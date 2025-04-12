@@ -224,51 +224,55 @@ with tab2:
     elif platform == "Facebook":
         st.subheader("Facebook Analytics")
         
-        # Facebook API connection
-        st.write("Connect to Facebook Graph API")
+        # Facebook API connection using facebook-business SDK
+        st.write("Connect to Facebook Marketing API")
         access_token = st.text_input("Access Token", type="password")
-        page_id = st.text_input("Facebook Page ID")
+        ad_account_id = st.text_input("Ad Account ID (optional)")
+        page_id = st.text_input("Page ID (optional)")
         
         if st.button("Connect to Facebook"):
             try:
-                graph = GraphAPI(access_token=access_token)
-                page_info = graph.get_object(id=page_id, fields='name,fan_count')
+                from facebook_business.api import FacebookAdsApi
+                from facebook_business.adobjects.user import User
+                from facebook_business.adobjects.page import Page
+                
+                FacebookAdsApi.init(access_token=access_token)
+                my_account = User(fbid='me')
+                st.success("Successfully connected to Facebook API")
+                
+                # Get pages if page_id not provided
+                if not page_id:
+                    pages = my_account.get_accounts()
+                    page_list = [page['name'] for page in pages]
+                    selected_page = st.selectbox("Select a Page", page_list)
+                    page_id = [p['id'] for p in pages if p['name'] == selected_page][0]
+                
+                # Get page insights
+                page = Page(page_id)
+                page_info = page.api_get(fields=['name,fan_count,insights.metric(page_engaged_users)'])
+                
                 st.success(f"Connected to {page_info['name']} (Likes: {page_info['fan_count']})")
                 
                 # Get page posts
-                posts = graph.get_connections(id=page_id, connection_name='posts',
-                                            fields='created_time,message,shares,reactions.summary(true),comments.summary(true)')
+                posts = page.get_connections(
+                    connection_name='posts',
+                    fields='created_time,message,shares,insights.metric(post_engaged_users,post_impressions)'
+                )
                 
                 post_data = []
-                for post in posts['data']:
+                for post in posts:
                     post_data.append({
                         "Date": post.get('created_time', ''),
                         "Message": post.get('message', '')[:100] + "..." if post.get('message') else "",
-                        "Reactions": post.get('reactions', {}).get('summary', {}).get('total_count', 0),
-                        "Comments": post.get('comments', {}).get('summary', {}).get('total_count', 0),
-                        "Shares": post.get('shares', {}).get('count', 0)
+                        "Impressions": post.get('insights', {}).get('data', [{}])[0].get('values', [{}])[0].get('value', 0),
+                        "Engaged Users": post.get('insights', {}).get('data', [{}])[1].get('values', [{}])[0].get('value', 0),
+                        "Shares": post.get('shares', {}).get('count', 0) if post.get('shares') else 0
                     })
                 
                 st.session_state.social_data = pd.DataFrame(post_data)
                 
             except Exception as e:
-                st.error(f"Error connecting to Facebook: {e}")
-        
-        if st.session_state.social_data is not None:
-            st.subheader("Recent Posts Performance")
-            st.dataframe(st.session_state.social_data)
-            
-            # Engagement metrics
-            st.subheader("Engagement Metrics")
-            df = st.session_state.social_data
-            
-            fig1 = px.line(df, x="Date", y="Reactions", title="Reactions Over Time")
-            st.plotly_chart(fig1)
-            
-            fig2 = px.line(df, x="Date", y=["Comments", "Shares"], 
-                          title="Comments & Shares Over Time")
-            st.plotly_chart(fig2)
-    
+                st.error(f"Error connecting to Facebook: {str(e)}")    
     elif platform == "LinkedIn":
         st.subheader("LinkedIn Analytics")
         
