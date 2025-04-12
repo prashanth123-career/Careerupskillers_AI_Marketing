@@ -224,56 +224,43 @@ with tab2:
     elif platform == "Facebook":
         st.subheader("Facebook Analytics")
         
-        # Facebook API connection using facebook-business SDK
-        st.write("Connect to Facebook Marketing API")
+        st.write("Connect to Facebook Graph API")
         access_token = st.text_input("Access Token", type="password")
-        ad_account_id = st.text_input("Ad Account ID (optional)")
-        page_id = st.text_input("Page ID (optional)")
+        page_id = st.text_input("Page ID")
         
         if st.button("Connect to Facebook"):
             try:
-                from facebook_business.api import FacebookAdsApi
-                from facebook_business.adobjects.user import User
-                from facebook_business.adobjects.page import Page
+                # Get basic page info
+                page_url = f"https://graph.facebook.com/v19.0/{page_id}?fields=name,fan_count&access_token={access_token}"
+                page_info = requests.get(page_url).json()
                 
-                FacebookAdsApi.init(access_token=access_token)
-                my_account = User(fbid='me')
-                st.success("Successfully connected to Facebook API")
-                
-                # Get pages if page_id not provided
-                if not page_id:
-                    pages = my_account.get_accounts()
-                    page_list = [page['name'] for page in pages]
-                    selected_page = st.selectbox("Select a Page", page_list)
-                    page_id = [p['id'] for p in pages if p['name'] == selected_page][0]
-                
-                # Get page insights
-                page = Page(page_id)
-                page_info = page.api_get(fields=['name,fan_count,insights.metric(page_engaged_users)'])
-                
-                st.success(f"Connected to {page_info['name']} (Likes: {page_info['fan_count']})")
-                
-                # Get page posts
-                posts = page.get_connections(
-                    connection_name='posts',
-                    fields='created_time,message,shares,insights.metric(post_engaged_users,post_impressions)'
-                )
-                
-                post_data = []
-                for post in posts:
-                    post_data.append({
-                        "Date": post.get('created_time', ''),
-                        "Message": post.get('message', '')[:100] + "..." if post.get('message') else "",
-                        "Impressions": post.get('insights', {}).get('data', [{}])[0].get('values', [{}])[0].get('value', 0),
-                        "Engaged Users": post.get('insights', {}).get('data', [{}])[1].get('values', [{}])[0].get('value', 0),
-                        "Shares": post.get('shares', {}).get('count', 0) if post.get('shares') else 0
-                    })
-                
-                st.session_state.social_data = pd.DataFrame(post_data)
-                
+                if 'error' in page_info:
+                    st.error(f"Facebook API Error: {page_info['error']['message']}")
+                else:
+                    st.success(f"Connected to {page_info['name']} (Likes: {page_info['fan_count']})")
+                    
+                    # Get page posts
+                    posts_url = f"https://graph.facebook.com/v19.0/{page_id}/posts?fields=created_time,message,shares,insights.metric(post_engaged_users,post_impressions)&access_token={access_token}"
+                    posts = requests.get(posts_url).json()
+                    
+                    post_data = []
+                    for post in posts.get('data', []):
+                        insights = post.get('insights', {}).get('data', [])
+                        impressions = next((i['values'][0]['value'] for i in insights if i['name'] == 'post_impressions'), 0)
+                        engaged_users = next((i['values'][0]['value'] for i in insights if i['name'] == 'post_engaged_users'), 0)
+                        
+                        post_data.append({
+                            "Date": post.get('created_time', ''),
+                            "Message": post.get('message', '')[:100] + "..." if post.get('message') else "",
+                            "Impressions": impressions,
+                            "Engaged Users": engaged_users,
+                            "Shares": post.get('shares', {}).get('count', 0) if post.get('shares') else 0
+                        })
+                    
+                    st.session_state.social_data = pd.DataFrame(post_data)
+                    
             except Exception as e:
-                st.error(f"Error connecting to Facebook: {str(e)}")    
-    elif platform == "LinkedIn":
+                st.error(f"Error connecting to Facebook: {str(e)}")    elif platform == "LinkedIn":
         st.subheader("LinkedIn Analytics")
         
         # LinkedIn API connection
